@@ -9,7 +9,6 @@ import pygame
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
-from OpenGL.GLUT import *
 from collections import namedtuple
 
 Vector3 = namedtuple("Vector3", ["x", "y", "z"])
@@ -75,8 +74,75 @@ MARS_MATERIAL = Material(MARS_AMBIENT, MARS_DIFFUSE, MARS_SPECULAR, MARS_SPECULA
 
 ORBIT_COLOR = Color(80, 80, 80, 255)
 
-enable_shading = False
+enable_shading = True
 
+def get_point_on_circle(radius, y, theta):
+    return (math.sin(theta) * radius, y, math.cos(theta) * radius)
+
+def draw_sphere(radius, stacks, slices):
+    y_step = 2 * radius / stacks
+    theta_step = 2 * math.pi / slices
+    
+    if (stacks < 2):
+        raise ValueError("A sphere needs at least two stacks")
+    
+    current_y = radius - y_step
+    # create the top cap, which is only triangle meshes since they all converge to a single point
+    cap_point = (0, radius, 0)
+    top_ring_radius = math.sqrt(radius ** 2 - current_y ** 2)
+    glBegin(GL_TRIANGLES)
+    for i in range(0, slices):
+        theta = i * theta_step
+        prev_theta = theta - theta_step
+        p1 = get_point_on_circle(top_ring_radius, current_y, theta)
+        p2 = get_point_on_circle(top_ring_radius, current_y, prev_theta)
+        glNormal3f(0, 1, 0)
+        glVertex3fv(cap_point)
+        glNormal3f(p1[0]/radius, p1[1]/radius, p1[2]/radius)
+        glVertex3fv(p1)
+        glNormal3f(p2[0]/radius, p2[1]/radius, p2[2]/radius)
+        glVertex3fv(p2)
+
+    glEnd()
+    # Center Stacks
+    glBegin(GL_QUADS)
+    for _ in range(0, stacks - 2):
+        current_y -= y_step
+        current_radius = math.sqrt(radius ** 2 - current_y ** 2)
+        last_radius = math.sqrt(radius ** 2 - (current_y + y_step) ** 2)
+        for i in range(0, slices):
+            theta = i * theta_step
+            prev_theta = theta - theta_step
+            points = [
+                get_point_on_circle(current_radius, current_y, theta),
+                get_point_on_circle(current_radius, current_y, prev_theta),
+                get_point_on_circle(last_radius, current_y + y_step, prev_theta),
+                get_point_on_circle(last_radius, current_y + y_step, theta)
+                    ]
+            for p in points:
+                glNormal3f(p[0]/radius, p[1]/radius, p[2]/radius)
+                glVertex3fv(p)
+
+    glEnd()
+    # create the bottom cap
+    cap_point = (0, -radius, 0)
+    bottom_ring_radius = math.sqrt(radius ** 2 - current_y ** 2)
+    glBegin(GL_TRIANGLES)
+    for i in range(0, slices):
+        theta = i * theta_step
+        prev_theta = theta - theta_step
+        p1 = get_point_on_circle(bottom_ring_radius, current_y, theta)
+        p2 = get_point_on_circle(bottom_ring_radius, current_y, prev_theta)
+        glNormal3f(0, -1, 0)
+        glVertex3fv(cap_point)
+        glNormal3f(p1[0]/radius, p1[1]/radius, p1[2]/radius)
+        glVertex3fv(p1)
+        glNormal3f(p2[0]/radius, p2[1]/radius, p2[2]/radius)
+        glVertex3fv(p2)
+    glEnd()
+
+
+    
 class Planet:
     def __init__(self, au_from_sun, frequency, relative_size, color, material, anchor = None):
         self.orbital_radius = au_from_sun * UNITS_PER_AU
@@ -88,6 +154,10 @@ class Planet:
         self.anchor = anchor
         self.material = material
         self.update_position(0)
+        self.sphere_list = glGenLists(1)
+        glNewList(self.sphere_list, GL_COMPILE)
+        draw_sphere(self.size, 50, 50)
+        glEndList()
 
     def update_position(self, time_passed):
         theta_difference = time_passed / self.frequency * 2 * math.pi
@@ -126,7 +196,7 @@ class Planet:
         glMaterialf(GL_FRONT, GL_SHININESS, self.material.specular_exponent)
         if self.material.emissive is not None:
             glMaterialfv(GL_FRONT, GL_EMISSION, list(self.material.emissive))
-        glutSolidSphere(self.size, 50, 50)
+        glCallList(self.sphere_list)
         glMaterialfv(GL_FRONT, GL_EMISSION, (0, 0, 0, 1))
         glPopMatrix()
 
@@ -138,7 +208,6 @@ def main():
     display = (800,800)
     pygame.display.set_mode(display, DOUBLEBUF|OPENGL)
     pygame.display.set_caption('Homework #2')
-    glutInit()
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     glOrtho(-20, 20, -20, 20, -20, 20)
